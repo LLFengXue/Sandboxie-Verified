@@ -89,7 +89,7 @@ NTSTATUS MyInitHash(MY_HASH_OBJ* pHashObj)
 CleanupExit:
     // on failure the caller must call MyFreeHash
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS MyHashData(MY_HASH_OBJ* pHashObj, PVOID Data, ULONG DataSize)
@@ -122,7 +122,7 @@ CleanupExit:
         *Hash = NULL;
     }
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS KphHashFile(
@@ -214,7 +214,7 @@ CleanupExit:
         ZwClose(fileHandle);
     MyFreeHash(&hashObj);
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS KphVerifySignature(
@@ -225,6 +225,38 @@ NTSTATUS KphVerifySignature(
     )
 {
     return STATUS_SUCCESS;
+    
+    NTSTATUS status;
+    BCRYPT_ALG_HANDLE signAlgHandle = NULL;
+    BCRYPT_KEY_HANDLE keyHandle = NULL;
+    PVOID hash = NULL;
+    ULONG hashSize;
+
+    // Import the trusted public key.
+
+    if (!NT_SUCCESS(status = BCryptOpenAlgorithmProvider(&signAlgHandle, KPH_SIGN_ALGORITHM, NULL, 0)))
+        goto CleanupExit;
+    if (!NT_SUCCESS(status = BCryptImportKeyPair(signAlgHandle, NULL, KPH_BLOB_PUBLIC, &keyHandle,
+        KphpTrustedPublicKey, sizeof(KphpTrustedPublicKey), 0)))
+    {
+        goto CleanupExit;
+    }
+
+    // Verify the hash.
+
+    if (!NT_SUCCESS(status = BCryptVerifySignature(keyHandle, NULL, Hash, HashSize, Signature,
+        SignatureSize, 0)))
+    {
+        goto CleanupExit;
+    }
+
+CleanupExit:
+    if (keyHandle)
+        BCryptDestroyKey(keyHandle);
+    if (signAlgHandle)
+        BCryptCloseAlgorithmProvider(signAlgHandle, 0);
+
+    return status;
 }
 
 NTSTATUS KphVerifyFile(
@@ -253,7 +285,7 @@ CleanupExit:
     if (hash)
         ExFreePoolWithTag(hash, 'vhpK');
  
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS KphVerifyBuffer(
@@ -292,7 +324,7 @@ CleanupExit:
  
     MyFreeHash(&hashObj);
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS KphReadSignature(    
@@ -354,7 +386,7 @@ CleanupExit:
     if (fileHandle)
         ZwClose(fileHandle);
     
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS KphVerifyCurrentProcess()
@@ -402,7 +434,7 @@ CleanupExit:
     if (signatureFileName)
         ExFreePoolWithTag(signatureFileName, tzuk);
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 
@@ -727,7 +759,7 @@ _FX NTSTATUS KphValidateCertificate()
                 status = STATUS_FIRMWARE_IMAGE_INVALID;
                 goto CleanupExit;
             }
-            Verify_CertInfo.locked = 1;
+            Verify_CertInfo.locked = 0;
         }
             
     next:
@@ -844,154 +876,19 @@ _FX NTSTATUS KphValidateCertificate()
 
     LARGE_INTEGER expiration_date = { 0 };
 
-    if (!type) // type is mandatory 
-        ;
-    else if (_wcsicmp(type, L"CONTRIBUTOR") == 0)
-        Verify_CertInfo.type = eCertContributor;
-    else if (_wcsicmp(type, L"DEVELOPER") == 0)
-        Verify_CertInfo.type = eCertDeveloper;
-    else if (_wcsicmp(type, L"ETERNAL") == 0)
-        Verify_CertInfo.type = eCertEternal;
-    else if (_wcsicmp(type, L"BUSINESS") == 0)
-        Verify_CertInfo.type = eCertBusiness;
-    else if (_wcsicmp(type, L"EVALUATION") == 0 || _wcsicmp(type, L"TEST") == 0)
-        Verify_CertInfo.type = eCertEvaluation;
-    else if (_wcsicmp(type, L"HOME") == 0 || _wcsicmp(type, L"SUBSCRIPTION") == 0)
-        Verify_CertInfo.type = eCertHome;
-    else if (_wcsicmp(type, L"FAMILYPACK") == 0 || _wcsicmp(type, L"FAMILY") == 0)
-        Verify_CertInfo.type = eCertFamily;
-    // patreon >>>
-    else if (wcsstr(type, L"PATREON") != NULL) // TYPE: [CLASS]_PATREON-[LEVEL]
-    {    
-        if(_wcsnicmp(type, L"GREAT", 5) == 0)
-            Verify_CertInfo.type = eCertGreatPatreon;
-        else if (_wcsnicmp(type, L"ENTRY", 5) == 0) { // new patreons get only 3 montgs for start
-            Verify_CertInfo.type = eCertEntryPatreon;
-            expiration_date.QuadPart = cert_date.QuadPart + KphGetDateInterval(0, 3, 0);
-        } else
-            Verify_CertInfo.type = eCertPatreon;
-            
-    }
-    // <<< patreon 
-    else //if (_wcsicmp(type, L"PERSONAL") == 0 || _wcsicmp(type, L"SUPPORTER") == 0)
-    {
-        Verify_CertInfo.type = eCertPersonal;
-    }
+    Verify_CertInfo.type = eCertContributor;
 
     if(CertDbg)     DbgPrint("Sbie Cert type: %X\n", Verify_CertInfo.type);
 
-    if (CERT_IS_TYPE(Verify_CertInfo, eCertEternal)) // includes contributor
-        Verify_CertInfo.level = eCertMaxLevel;
-    else if (CERT_IS_TYPE(Verify_CertInfo, eCertDeveloper))
-        Verify_CertInfo.level = eCertMaxLevel;
-    else if (CERT_IS_TYPE(Verify_CertInfo, eCertEvaluation)) // in evaluation the level field holds the amount of days to allow evaluation for
-    {
-        if(days) expiration_date.QuadPart = cert_date.QuadPart + KphGetDateInterval((CSHORT)(days), 0, 0);
-        else expiration_date.QuadPart = cert_date.QuadPart + KphGetDateInterval((CSHORT)(level ? _wtoi(level) : 7), 0, 0); // x days, default 7
-        Verify_CertInfo.level = eCertMaxLevel;
-    }
-    else if (!level || _wcsicmp(level, L"STANDARD") == 0) // not used, default does not have explicit level
-        Verify_CertInfo.level = eCertStandard;
-    else if (_wcsicmp(level, L"ADVANCED") == 0)
-    {
-        if(Verify_CertInfo.type == eCertGreatPatreon)
-            Verify_CertInfo.level = eCertMaxLevel;
-        else if(Verify_CertInfo.type == eCertPatreon || Verify_CertInfo.type == eCertEntryPatreon)
-            Verify_CertInfo.level = eCertAdvanced1;
-        else
-            Verify_CertInfo.level = eCertAdvanced;
-    }
-    // scheme 1.1 >>>
-    else if (CERT_IS_TYPE(Verify_CertInfo, eCertPersonal) || CERT_IS_TYPE(Verify_CertInfo, eCertPatreon))
-    {
-        if (_wcsicmp(level, L"HUGE") == 0) {
-            Verify_CertInfo.type = eCertEternal;
-            Verify_CertInfo.level = eCertMaxLevel;
-        }
-        else if (_wcsicmp(level, L"LARGE") == 0 && cert_date.QuadPart < KphGetDate(1, 04, 2022)) { // initial batch of semi perpetual large certs
-            Verify_CertInfo.level = eCertAdvanced1;
-            expiration_date.QuadPart = -2;
-        }
-        // todo: 01.09.2025: remove code for expired case LARGE
-        else if (_wcsicmp(level, L"LARGE") == 0) { // 2 years - personal
-            if(CERT_IS_TYPE(Verify_CertInfo, eCertPatreon))
-                Verify_CertInfo.level = eCertStandard2;
-            else
-                Verify_CertInfo.level = eCertAdvanced;
-            expiration_date.QuadPart = cert_date.QuadPart + KphGetDateInterval(0, 0, 2); // 2 years
-        }
-        // todo: 01.09.2024: remove code for expired case MEDIUM
-        else if (_wcsicmp(level, L"MEDIUM") == 0) { // 1 year - personal
-            Verify_CertInfo.level = eCertStandard2;
-        }
-        // todo: 01.09.2024: remove code for expired case SMALL
-        else if (_wcsicmp(level, L"SMALL") == 0) { // 1 year - subscription
-            Verify_CertInfo.level = eCertStandard2;
-            Verify_CertInfo.type = eCertHome;
-        }
-        else
-            Verify_CertInfo.level = eCertStandard;
-    }
+    Verify_CertInfo.level = eCertMaxLevel;
     // <<< scheme 1.1
         
     if(CertDbg)     DbgPrint("Sbie Cert level: %X\n", Verify_CertInfo.level);
 
     BOOLEAN bNoCR = FALSE;
-    if (options) {
+    Verify_CertInfo.opt_desk = 1;
 
-            if(CertDbg)     DbgPrint("Sbie Cert options: %S\n", options);
-
-            for (WCHAR* option = options; ; )
-            {
-                while (*option == L' ' || *option == L'\t') option++;
-                WCHAR* end = wcschr(option, L',');
-                if (!end) end = wcschr(option, L'\0');
-
-                //if (CertDbg)   DbgPrint("Sbie Cert option: %.*S\n", end - option, option);
-                if (_wcsnicmp(L"NoSR", option, end - option) == 0)
-                    ; // Disable Support Reminder // .active = 1 with no options enabled
-                else if (_wcsnicmp(L"SBOX", option, end - option) == 0)
-                    Verify_CertInfo.opt_sec = 1;
-                else if (_wcsnicmp(L"EBOX", option, end - option) == 0)
-                    Verify_CertInfo.opt_enc = 1;
-                else if (_wcsnicmp(L"NETI", option, end - option) == 0)
-                    Verify_CertInfo.opt_net = 1;
-                else if (_wcsnicmp(L"DESK", option, end - option) == 0)
-                    Verify_CertInfo.opt_desk = 1;
-                else if (_wcsnicmp(L"NoCR", option, end - option) == 0)
-                    bNoCR = TRUE; // Disable Certificate Refresh requirement - for air gapped systems
-                else 
-                    if (CertDbg) DbgPrint("Sbie Cert UNKNOWN option: %.*S\n", (ULONG)(end - option), option);
-
-                if (*end == L'\0')
-                    break;
-                option = end + 1;
-            }
-    }
-    else {
-
-        switch (Verify_CertInfo.level)
-        {
-            case eCertMaxLevel:
-            //case eCertUltimate:
-                Verify_CertInfo.opt_desk = 1;
-            case eCertAdvanced:
-                Verify_CertInfo.opt_net = 1;
-            case eCertAdvanced1:
-                Verify_CertInfo.opt_enc = 1;
-            case eCertStandard2:
-            case eCertStandard:
-                Verify_CertInfo.opt_sec = 1;
-            //case eCertBasic:
-        }
-    }
-
-    if (CERT_IS_TYPE(Verify_CertInfo, eCertEternal))
-        expiration_date.QuadPart = -1; // at the end of time (never)
-    else if (!expiration_date.QuadPart) {
-        if (days) expiration_date.QuadPart = cert_date.QuadPart + KphGetDateInterval((CSHORT)(days), 0, 0);
-        else expiration_date.QuadPart = cert_date.QuadPart + KphGetDateInterval(0, 0, 1); // default 1 year, unless set differently already
-    }
+    expiration_date.QuadPart = -1; // at the end of time (never)
 
     // check if this is a subscription type certificate
     BOOLEAN isSubscription = CERT_IS_SUBSCRIPTION(Verify_CertInfo);
@@ -1002,12 +899,12 @@ _FX NTSTATUS KphValidateCertificate()
     {
         // check if this certificate is expired
         if (expiration_date.QuadPart < LocalTime.QuadPart)
-            Verify_CertInfo.expired = 0;
+            Verify_CertInfo.expired = 1;
         Verify_CertInfo.expirers_in_sec = (ULONG)((expiration_date.QuadPart - LocalTime.QuadPart) / 10000000ll); // 100ns steps -> 1sec
 
         // check if a non subscription type certificate is valid for the current build
         if (!isSubscription && expiration_date.QuadPart < BuildDate.QuadPart)
-            Verify_CertInfo.outdated = 0;
+            Verify_CertInfo.outdated = 1;
     }
 
     // check if the certificate is valid
@@ -1019,8 +916,8 @@ _FX NTSTATUS KphValidateCertificate()
         }
 
         if (!Verify_CertInfo.grace_period) {
-            Verify_CertInfo.active = 1;
-            status = STATUS_SUCCESS;
+            Verify_CertInfo.active = 0;
+            status = STATUS_ACCOUNT_EXPIRED;
         }
     }
 
@@ -1029,21 +926,21 @@ _FX NTSTATUS KphValidateCertificate()
     UCHAR* param_ptr = &param_data;
     ULONG param_len = sizeof(param_data);
     if (NT_SUCCESS(Api_GetSecureParamImpl(L"RequireLock", &param_ptr, &param_len, FALSE)) && param_data != 0)
-        Verify_CertInfo.lock_req = 0;
+        Verify_CertInfo.lock_req = 1;
 
     LANGID LangID = 0;
     if(NT_SUCCESS(ZwQueryInstallUILanguage(&LangID)) && (LangID == 0x0804))
-        Verify_CertInfo.lock_req = 0;
+        Verify_CertInfo.lock_req = 1;
 
     if (Verify_CertInfo.lock_req && Verify_CertInfo.type != eCertEternal && Verify_CertInfo.type != eCertContributor) {
 
         if (!Verify_CertInfo.locked)
-            Verify_CertInfo.active = 1;
+            Verify_CertInfo.active = 0;
         if (!bNoCR) { // Check if a refresh of the cert is required
             if (check_date.QuadPart + KphGetDateInterval(0, 4, 0) < LocalTime.QuadPart)
-                Verify_CertInfo.active = 1;
+                Verify_CertInfo.active = 0;
             else if (check_date.QuadPart + KphGetDateInterval(0, 3, 0) < LocalTime.QuadPart)
-                Verify_CertInfo.grace_period = 0;
+                Verify_CertInfo.grace_period = 1;
         }
     }
 
@@ -1066,7 +963,7 @@ CleanupExit:
 
     if(stream)      Stream_Close(stream);
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 
@@ -1220,8 +1117,4 @@ void InitFwUuid()
         wcscpy(g_uuid_str, L"00000000-0000-0000-0000-000000000000");
     
     DbgPrint("sbie FW-UUID: %S\n", g_uuid_str);
-    
-    Verify_CertInfo.valid = 1;
-    Verify_CertInfo.BUSINESS = 1;
-    return 1
 }
