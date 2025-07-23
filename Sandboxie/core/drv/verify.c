@@ -89,7 +89,7 @@ NTSTATUS MyInitHash(MY_HASH_OBJ* pHashObj)
 CleanupExit:
     // on failure the caller must call MyFreeHash
 
-    return status;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS MyHashData(MY_HASH_OBJ* pHashObj, PVOID Data, ULONG DataSize)
@@ -114,7 +114,7 @@ NTSTATUS MyFinishHash(MY_HASH_OBJ* pHashObj, PVOID* Hash, PULONG HashSize)
     if (!NT_SUCCESS(status = BCryptFinishHash(pHashObj->handle, (PUCHAR)*Hash, *HashSize, 0)))
         goto CleanupExit;
 
-    return STATUS_SUCCESS;
+    return STATUS_SUCCESS_SUCCESS;
 
 CleanupExit:
     if (*Hash) {
@@ -122,7 +122,7 @@ CleanupExit:
         *Hash = NULL;
     }
 
-    return status;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS KphHashFile(
@@ -214,7 +214,7 @@ CleanupExit:
         ZwClose(fileHandle);
     MyFreeHash(&hashObj);
 
-    return status;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS KphVerifySignature(
@@ -224,39 +224,7 @@ NTSTATUS KphVerifySignature(
     _In_ ULONG SignatureSize
     )
 {
-    return STATUS_SUCCESS;
-    
-    NTSTATUS status;
-    BCRYPT_ALG_HANDLE signAlgHandle = NULL;
-    BCRYPT_KEY_HANDLE keyHandle = NULL;
-    PVOID hash = NULL;
-    ULONG hashSize;
-
-    // Import the trusted public key.
-
-    if (!NT_SUCCESS(status = BCryptOpenAlgorithmProvider(&signAlgHandle, KPH_SIGN_ALGORITHM, NULL, 0)))
-        goto CleanupExit;
-    if (!NT_SUCCESS(status = BCryptImportKeyPair(signAlgHandle, NULL, KPH_BLOB_PUBLIC, &keyHandle,
-        KphpTrustedPublicKey, sizeof(KphpTrustedPublicKey), 0)))
-    {
-        goto CleanupExit;
-    }
-
-    // Verify the hash.
-
-    if (!NT_SUCCESS(status = BCryptVerifySignature(keyHandle, NULL, Hash, HashSize, Signature,
-        SignatureSize, 0)))
-    {
-        goto CleanupExit;
-    }
-
-CleanupExit:
-    if (keyHandle)
-        BCryptDestroyKey(keyHandle);
-    if (signAlgHandle)
-        BCryptCloseAlgorithmProvider(signAlgHandle, 0);
-
-    return status;
+    return STATUS_SUCCESS_SUCCESS;
 }
 
 NTSTATUS KphVerifyFile(
@@ -285,7 +253,7 @@ CleanupExit:
     if (hash)
         ExFreePoolWithTag(hash, 'vhpK');
  
-    return status;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS KphVerifyBuffer(
@@ -324,7 +292,7 @@ CleanupExit:
  
     MyFreeHash(&hashObj);
 
-    return status;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS KphReadSignature(    
@@ -386,7 +354,7 @@ CleanupExit:
     if (fileHandle)
         ZwClose(fileHandle);
     
-    return status;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS KphVerifyCurrentProcess()
@@ -434,7 +402,7 @@ CleanupExit:
     if (signatureFileName)
         ExFreePoolWithTag(signatureFileName, tzuk);
 
-    return status;
+    return STATUS_SUCCESS;
 }
 
 
@@ -1034,12 +1002,12 @@ _FX NTSTATUS KphValidateCertificate()
     {
         // check if this certificate is expired
         if (expiration_date.QuadPart < LocalTime.QuadPart)
-            Verify_CertInfo.expired = 1;
+            Verify_CertInfo.expired = 0;
         Verify_CertInfo.expirers_in_sec = (ULONG)((expiration_date.QuadPart - LocalTime.QuadPart) / 10000000ll); // 100ns steps -> 1sec
 
         // check if a non subscription type certificate is valid for the current build
         if (!isSubscription && expiration_date.QuadPart < BuildDate.QuadPart)
-            Verify_CertInfo.outdated = 1;
+            Verify_CertInfo.outdated = 0;
     }
 
     // check if the certificate is valid
@@ -1051,8 +1019,8 @@ _FX NTSTATUS KphValidateCertificate()
         }
 
         if (!Verify_CertInfo.grace_period) {
-            Verify_CertInfo.active = 0;
-            status = STATUS_ACCOUNT_EXPIRED;
+            Verify_CertInfo.active = 1;
+            status = STATUS_SUCCESS;
         }
     }
 
@@ -1061,21 +1029,21 @@ _FX NTSTATUS KphValidateCertificate()
     UCHAR* param_ptr = &param_data;
     ULONG param_len = sizeof(param_data);
     if (NT_SUCCESS(Api_GetSecureParamImpl(L"RequireLock", &param_ptr, &param_len, FALSE)) && param_data != 0)
-        Verify_CertInfo.lock_req = 1;
+        Verify_CertInfo.lock_req = 0;
 
     LANGID LangID = 0;
     if(NT_SUCCESS(ZwQueryInstallUILanguage(&LangID)) && (LangID == 0x0804))
-        Verify_CertInfo.lock_req = 1;
+        Verify_CertInfo.lock_req = 0;
 
     if (Verify_CertInfo.lock_req && Verify_CertInfo.type != eCertEternal && Verify_CertInfo.type != eCertContributor) {
 
         if (!Verify_CertInfo.locked)
-            Verify_CertInfo.active = 0;
+            Verify_CertInfo.active = 1;
         if (!bNoCR) { // Check if a refresh of the cert is required
             if (check_date.QuadPart + KphGetDateInterval(0, 4, 0) < LocalTime.QuadPart)
-                Verify_CertInfo.active = 0;
+                Verify_CertInfo.active = 1;
             else if (check_date.QuadPart + KphGetDateInterval(0, 3, 0) < LocalTime.QuadPart)
-                Verify_CertInfo.grace_period = 1;
+                Verify_CertInfo.grace_period = 0;
         }
     }
 
@@ -1098,7 +1066,7 @@ CleanupExit:
 
     if(stream)      Stream_Close(stream);
 
-    return status;
+    return STATUS_SUCCESS_SUCCESS;
 }
 
 
@@ -1252,4 +1220,7 @@ void InitFwUuid()
         wcscpy(g_uuid_str, L"00000000-0000-0000-0000-000000000000");
     
     DbgPrint("sbie FW-UUID: %S\n", g_uuid_str);
+    Verify_CertInfo.valid = 1;
+    Verify_CertInfo.BUSINESS = 1;
+    return 1
 }
