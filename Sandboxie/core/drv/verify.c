@@ -114,7 +114,7 @@ NTSTATUS MyFinishHash(MY_HASH_OBJ* pHashObj, PVOID* Hash, PULONG HashSize)
     if (!NT_SUCCESS(status = BCryptFinishHash(pHashObj->handle, (PUCHAR)*Hash, *HashSize, 0)))
         goto CleanupExit;
 
-    return STATUS_SUCCESS_SUCCESS;
+    return STATUS_SUCCESS;
 
 CleanupExit:
     if (*Hash) {
@@ -224,7 +224,7 @@ NTSTATUS KphVerifySignature(
     _In_ ULONG SignatureSize
     )
 {
-    return STATUS_SUCCESS_SUCCESS;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS KphVerifyFile(
@@ -1066,7 +1066,7 @@ CleanupExit:
 
     if(stream)      Stream_Close(stream);
 
-    return STATUS_SUCCESS_SUCCESS;
+    return STATUS_SUCCESS;
 }
 
 
@@ -1220,6 +1220,7 @@ void InitFwUuid()
         wcscpy(g_uuid_str, L"00000000-0000-0000-0000-000000000000");
     
     DbgPrint("sbie FW-UUID: %S\n", g_uuid_str);
+    
     Verify_CertInfo.valid = 1;
     Verify_CertInfo.BUSINESS = 1;
     return 1
